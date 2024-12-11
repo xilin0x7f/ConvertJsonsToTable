@@ -6,41 +6,69 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/xuri/excelize/v2"
-	"io"
 	"os"
 	"sort"
 )
 
+func flattenJSON(data map[string]interface{}, prefix string, flatMap map[string]interface{}) {
+	for key, value := range data {
+		fullKey := key
+		if prefix != "" {
+			fullKey = prefix + "." + key
+		}
+		switch v := value.(type) {
+		case map[string]interface{}:
+			flattenJSON(v, fullKey, flatMap)
+		default:
+			flatMap[fullKey] = v
+		}
+	}
+}
+
 func WriteJson2XLSX(filesName []string, dstFileName, sheetName, start string) error {
 	keysMap := make(map[string]int)
+
+	// First pass: collect keys
 	for _, fileName := range filesName {
 		file, _ := os.Open(fileName)
 		var jsonData map[string]interface{}
-		reader := io.Reader(file)
-		decoder := json.NewDecoder(reader)
+		decoder := json.NewDecoder(file)
 		_ = decoder.Decode(&jsonData)
 		_ = file.Close()
-		for key := range jsonData {
+
+		flatData := make(map[string]interface{})
+		flattenJSON(jsonData, "", flatData)
+
+		for key := range flatData {
 			keysMap[key]++
 		}
 	}
+
+	// Extract and sort keys
 	var keys []string
 	for key := range keysMap {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
+
+	// Second pass: collect data
 	resMap := make(map[string][]interface{})
 	for _, fileName := range filesName {
 		file, _ := os.Open(fileName)
 		var jsonData map[string]interface{}
-		reader := io.Reader(file)
-		decoder := json.NewDecoder(reader)
+		decoder := json.NewDecoder(file)
 		_ = decoder.Decode(&jsonData)
 		_ = file.Close()
+
+		flatData := make(map[string]interface{})
+		flattenJSON(jsonData, "", flatData)
+
 		for _, key := range keys {
-			resMap[key] = append(resMap[key], jsonData[key])
+			resMap[key] = append(resMap[key], flatData[key])
 		}
 	}
+
+	// Build result matrix
 	res := make([][]interface{}, len(resMap[keys[0]])+1)
 	for idx := range res {
 		res[idx] = make([]interface{}, len(keys)+1)
@@ -55,6 +83,8 @@ func WriteJson2XLSX(filesName []string, dstFileName, sheetName, start string) er
 			res[rowIdx+1][colIdx+1] = resMap[keys[colIdx]][rowIdx]
 		}
 	}
+
+	// Write to Excel
 	err := Write2XLSX(dstFileName, sheetName, start, res)
 	return err
 }
